@@ -1,0 +1,1906 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="Интерактивная карта Солнечной системы: Солнце, восемь планет, Луна, пояс астероидов, кометы, полноэкранный режим и мини-игра «Найди планету».">
+<meta name="theme-color" content="#0a0a15">
+<title>Солнечная система — Интерактивное путешествие</title>
+
+<style>
+/* ============================================================================
+   БЛОК 1. ПЕРЕМЕННЫЕ ТЕМЫ И СБРОС СТИЛЕЙ
+   ============================================================================ */
+:root{
+  /* Цвета */
+  --c-bg-center:#1a1a2e;              /* центр фонового градиента */
+  --c-bg-edge:#0a0a15;                /* края фонового градиента */
+  --c-sun:#ff6b00;                    /* оранжевый цвет Солнца */
+  --c-orbit:rgba(255,255,255,.1);     /* тонкие линии орбит */
+  --c-orbit-hi:rgba(255,107,0,.65);   /* подсветка орбиты при наведении */
+  --c-text:#ffffff;                   /* основной белый текст */
+  --c-muted:#8a8aa3;                  /* приглушённый серый текст */
+  --c-accent:#7aa2ff;                 /* акцент (выделение, кнопки) */
+  --c-line:rgba(255,255,255,.12);     /* тонкие рамки */
+  --c-card:rgba(255,255,255,.045);    /* полупрозрачные карточки */
+
+  /* Цвета мини-игры */
+  --c-good:#4ade80;                   /* правильный ответ */
+  --c-bad:#ff6369;                    /* неправильный ответ */
+
+  /* Геометрия системы (значения в "проектных" пикселях) */
+  --sys-size:1280px;   /* габарит всей системы (высота и ширина) */
+  --scale:.5;          /* коэффициент масштаба сцены — считается в JS */
+  --zoom:1;            /* компенсация размера планет на маленьких экранах */
+  --label-scale:1;     /* компенсация размера подписей */
+  --speed:1;           /* множитель скорости движения по орбитам */
+  --delay:0s;          /* стартовый сдвиг планеты по своей орбите */
+  --r:100px;           /* радиус текущей орбиты */
+  --spin:12s;          /* период оборота текущей орбиты */
+  --moon-dur:7s;       /* период оборота Луны вокруг Земли (задаётся из JS) */
+  --d:12px;            /* диаметр текущей планеты */
+  --c1:#ffffff;        /* светлый полюс планеты */
+  --c2:#666677;        /* тёмный полюс планеты */
+  --glow:rgba(255,255,255,.3);
+}
+
+*,*::before,*::after{box-sizing:border-box;}
+html{-webkit-text-size-adjust:100%;}
+html,body{margin:0;padding:0;}
+
+/* ============================================================================
+   БЛОК 2. ФОН И ЗВЁЗДНОЕ ПОЛЕ
+   ============================================================================ */
+body{
+  min-height:100vh;
+  display:flex;                     /* вертикальная компоновка страницы */
+  flex-direction:column;
+  overflow-x:hidden;                /* горизонтальный скролл не нужен */
+  color:var(--c-text);
+  font-family:"Segoe UI",system-ui,-apple-system,"Helvetica Neue",Arial,sans-serif;
+  /* Радиальный градиент: #1a1a2e в центре -> #0a0a15 по краям */
+  background:radial-gradient(circle at 50% 50%,var(--c-bg-center) 0%,var(--c-bg-edge) 78%);
+  background-attachment:fixed;
+  -webkit-font-smoothing:antialiased;
+}
+
+/* Слой со звёздами (точки генерируются в JS) */
+.sky{position:fixed;inset:0;overflow:hidden;pointer-events:none;z-index:0;}
+.star{
+  position:absolute;border-radius:50%;background:#fff;
+  box-shadow:0 0 5px rgba(255,255,255,.7);
+  animation:twinkle 5s ease-in-out infinite;
+}
+.star--warm{background:#ffd9a8;box-shadow:0 0 6px rgba(255,190,120,.8);}
+.star--blue{background:#cfe2ff;box-shadow:0 0 6px rgba(160,200,255,.8);}
+
+/* Падающие звёзды */
+.shooter{
+  position:absolute;top:-15vh;width:2px;height:120px;
+  background:linear-gradient(to bottom,rgba(255,255,255,0),rgba(255,255,255,.85));
+  opacity:0;transform:rotate(35deg);
+  animation:shoot 13s linear infinite;
+}
+
+/* ============================================================================
+   БЛОК 3. ОБЁРТКА СТРАНИЦЫ И ЗАГОЛОВКИ
+   ============================================================================ */
+.page{
+  position:relative;z-index:1;       /* контент поверх звёзд */
+  width:100%;max-width:1220px;
+  margin:auto;                       /* центрирование по вертикали и горизонтали */
+  padding:clamp(18px,3vw,34px) clamp(14px,3vw,26px);
+  animation:fadeIn .9s ease both;
+}
+
+.header{text-align:center;margin-bottom:clamp(14px,2.4vw,26px);}
+
+.title{
+  margin:0;
+  font-size:clamp(1.9rem,6.2vw,3.3rem);
+  font-weight:600;letter-spacing:.02em;line-height:1.1;
+  color:var(--c-text);
+  text-shadow:0 0 26px rgba(255,255,255,.22);
+}
+
+.subtitle{
+  margin:.55em 0 0;
+  font-size:clamp(.78rem,2.3vw,1.05rem);
+  font-weight:400;letter-spacing:.24em;text-transform:uppercase;
+  color:var(--c-muted);
+}
+
+/* ============================================================================
+   БЛОК 4. СЕТКА: СЦЕНА + ИНФОРМАЦИОННАЯ ПАНЕЛЬ
+   ============================================================================ */
+.layout{
+  display:grid;
+  grid-template-columns:minmax(0,1fr) minmax(0,340px);
+  gap:clamp(14px,2.2vw,26px);
+  align-items:center;
+}
+.stage-box{min-width:0;}
+
+/* Сцена: высота = габарит системы, умноженный на коэффициент масштаба */
+.stage{
+  position:relative;width:100%;
+  height:calc(var(--sys-size) * var(--scale));
+  min-height:250px;overflow:hidden;
+}
+/* Сама система: фиксированный проектный размер + трансформация масштаба */
+.system{
+  position:absolute;top:50%;left:50%;
+  width:var(--sys-size);height:var(--sys-size);
+  transform:translate(-50%,-50%) scale(var(--scale));
+  transform-origin:center center;
+}
+
+.hint{
+  margin:6px 0 0;text-align:center;
+  font-size:clamp(.72rem,2vw,.85rem);color:var(--c-muted);
+}
+
+/* ============================================================================
+   БЛОК 5. СОЛНЦЕ (пульсирующее свечение)
+   ============================================================================ */
+.sun{
+  position:absolute;left:50%;top:50%;
+  width:calc(78px * var(--zoom));height:calc(78px * var(--zoom));
+  transform:translate(-50%,-50%);
+  padding:0;border:0;background:transparent;overflow:visible;
+  cursor:pointer;display:block;
+  transition:scale .25s ease;
+}
+.sun:hover{scale:1.08;}
+
+/* Внешний слой свечения: плавно пульсирует 3.6 с */
+.sun__glow{
+  position:absolute;inset:0;border-radius:50%;
+  z-index:0;pointer-events:none;
+  transform-origin:center center;
+  background:
+    radial-gradient(circle,rgba(255,150,60,.45),rgba(255,107,0,.16) 58%,rgba(255,107,0,0) 76%);
+  box-shadow:
+    0 0 60px 20px rgba(255,107,0,.5),
+    0 0 130px 45px rgba(255,107,0,.22);
+  animation:sunGlow 3.6s ease-in-out infinite;
+}
+@keyframes sunGlow{
+  0%   {transform:scale(.86); opacity:.68;}
+  50%  {transform:scale(1.16); opacity:1;}
+  100% {transform:scale(.86); opacity:.68;}
+}
+
+.sun__core{
+  position:absolute;inset:0;border-radius:50%;z-index:2;
+  background:
+    radial-gradient(circle at 32% 28%,rgba(255,255,255,.6),rgba(255,255,255,0) 45%),
+    conic-gradient(from 0deg,#ffb347,#ff6b00 25%,#ff9d2f 50%,#ff6b00 75%,#ffb347);
+  /* Размытое свечение вокруг Солнца */
+  box-shadow:
+    0 0 60px 20px rgba(255,107,0,.6),
+    0 0 160px 60px rgba(255,107,0,.25);
+  animation:spin 26s linear infinite;
+}
+
+.sun__corona{
+  position:absolute;inset:-34%;border-radius:50%;pointer-events:none;z-index:1;
+  background:radial-gradient(circle,rgba(255,150,50,.35),rgba(255,150,50,0) 70%);
+  animation:pulse 3.8s ease-in-out infinite;
+}
+
+/* Состояние «выбрано» для Солнца */
+.sun[aria-pressed="true"]::after{
+  content:"";position:absolute;inset:4%;border-radius:50%;pointer-events:none;z-index:3;
+  border:1px solid rgba(255,255,255,.6);
+  box-shadow:0 0 22px rgba(255,255,255,.25);
+  animation:pulse 2.6s ease-in-out infinite;
+}
+
+/* ============================================================================
+   БЛОК 6. ОРБИТЫ, ПЛАНЕТЫ И ПОДПИСИ (подсветка орбиты при наведении)
+   ============================================================================ */
+.orbit{
+  position:absolute;left:50%;top:50%;
+  width:calc(var(--r) * 2);height:calc(var(--r) * 2);
+  margin-left:calc(var(--r) * -1);margin-top:calc(var(--r) * -1);
+  border:1px solid var(--c-orbit);       /* rgba(255,255,255,0.1) */
+  border-radius:50%;
+  display:flex;justify-content:center;align-items:flex-start;
+  pointer-events:none;                    /* не мешает кликам по внутренним планетам */
+  animation-name:spin;
+  animation-duration:calc(var(--spin) / var(--speed));
+  animation-timing-function:linear;
+  animation-iteration-count:infinite;
+  animation-delay:var(--delay);
+  transition:border-color .35s ease,box-shadow .35s ease;
+}
+
+/* Состояние «планета выбрана» — мягкая постоянная подсветка орбиты */
+.orbit.is-active{
+  border-color:rgba(255,107,0,.42);
+  box-shadow:0 0 20px -6px rgba(255,107,0,.4);
+}
+
+/* Наведение курсора на планету зажигает её орбиту оранжевым */
+.orbit:hover{
+  border-color:var(--c-orbit-hi);
+  box-shadow:
+    0 0 26px -4px rgba(255,107,0,.55),
+    inset 0 0 60px -18px rgba(255,107,0,.45);
+}
+
+/* Держатель планеты: вращается в обратную сторону, чтобы планета «стояла» ровно */
+.holder{
+  position:relative;                /* база для маленькой орбиты Луны */
+  display:flex;flex-direction:column;align-items:center;
+  pointer-events:none;
+  animation-name:spin;
+  animation-duration:calc(var(--spin) / var(--speed));
+  animation-timing-function:linear;
+  animation-iteration-count:infinite;
+  animation-direction:reverse;
+  animation-delay:var(--delay);
+}
+
+/* Кнопка планеты (с невидимой зоной клика вокруг маленького шара) */
+.planet{
+  pointer-events:auto;position:relative;
+  display:grid;place-items:center;
+  width:calc(var(--d) + 32px * var(--zoom));
+  height:calc(var(--d) + 32px * var(--zoom));
+  padding:0;border:0;background:transparent;overflow:visible;
+  cursor:pointer;
+  transition:scale .25s ease;
+}
+.planet:hover{scale:1.3;}
+
+.ball{
+  position:relative;
+  width:var(--d);height:var(--d);border-radius:50%;
+  background:radial-gradient(circle at 32% 28%,var(--c1),var(--c2) 78%);
+  box-shadow:
+    inset calc(-2px * var(--zoom)) calc(-2px * var(--zoom)) calc(5px * var(--zoom)) rgba(0,0,0,.55),
+    inset calc(2px * var(--zoom)) calc(2px * var(--zoom)) calc(4px * var(--zoom)) rgba(255,255,255,.18),
+    0 0 calc(12px * var(--zoom)) var(--glow);
+}
+
+/* Полосы газовых гигантов */
+.planet--bands .ball{
+  background-image:
+    repeating-linear-gradient(to bottom,rgba(255,255,255,.16) 0 7%,rgba(0,0,0,.16) 7% 14%),
+    radial-gradient(circle at 32% 28%,var(--c1),var(--c2) 78%);
+}
+/* Большое Красное Пятно на Юпитере */
+.planet[data-key="jupiter"] .ball::after{
+  content:"";position:absolute;left:52%;top:58%;
+  width:26%;height:17%;border-radius:50%;
+  background:rgba(198,84,52,.8);
+}
+/* Кольца Сатурна и Урана */
+.planet--ring .ball::before{
+  content:"";position:absolute;left:50%;top:50%;
+  width:190%;height:190%;
+  transform:translate(-50%,-50%) rotate(-22deg);
+  border-radius:50%;
+  border:2px solid rgba(228,214,168,.6);
+  box-shadow:0 0 6px rgba(255,230,180,.25);
+}
+.planet--ring.planet--thin .ball::before{
+  width:160%;height:160%;
+  border-width:1px;border-color:rgba(180,220,230,.45);
+  transform:translate(-50%,-50%) rotate(72deg);
+}
+/* Выделение выбранной планеты */
+.planet[aria-pressed="true"] .ball{
+  box-shadow:
+    inset calc(-2px * var(--zoom)) calc(-2px * var(--zoom)) calc(5px * var(--zoom)) rgba(0,0,0,.55),
+    0 0 0 2px rgba(255,255,255,.85),
+    0 0 24px 4px var(--glow);
+  animation:pulse 2.6s ease-in-out infinite;
+}
+
+/* Подпись планеты */
+.tag{
+  margin-top:calc(9px * var(--zoom));
+  padding:3px 9px;border-radius:999px;
+  font-size:calc(11px * var(--label-scale));
+  letter-spacing:.14em;text-transform:uppercase;
+  color:rgba(255,255,255,.78);white-space:nowrap;
+  background:rgba(10,10,21,.55);
+  border:1px solid var(--c-line);
+  text-shadow:0 1px 6px rgba(0,0,0,.8);
+  opacity:.85;pointer-events:none;
+  transition:opacity .25s ease,color .25s ease,border-color .25s ease;
+}
+.holder:hover .tag,
+.planet[aria-pressed="true"] + .tag{opacity:1;color:#fff;border-color:rgba(255,255,255,.4);}
+
+/* Режимы: подписи выключены / компактный экран */
+body.no-labels .tag{display:none;}
+body.compact .tag{opacity:0;}
+body.compact .holder:hover .tag,
+body.compact .planet[aria-pressed="true"] + .tag{opacity:1;}
+
+/* ============================================================================
+   ★ БЛОК 6A. ДОБАВЛЕНИЕ 1: ЛУНА ВОКРУГ ЗЕМЛИ ★
+   ---------------------------------------------------------------------------
+   .moon-orbit — маленькая окружность, отцентрованная по центру шарика Земли
+                (верх = половина «невидимой» зоны клика 16px × zoom);
+   .moon-arm   — вращающийся «плечо», к его краю прикреплена Луна;
+   .moon       — сам спутник: ~5px, цвет #9a9a9a, без подписи и без клика.
+   ============================================================================ */
+.moon-orbit{
+  position:absolute;                 /* не анимируется — тут только центровка */
+  top:calc(16px * var(--zoom));
+  left:50%;
+  width:30px;height:30px;            /* радиус 15px от центра Земли */
+  transform:translate(-50%,-50%);
+  border-radius:50%;
+  pointer-events:none;               /* Луна не кликабельна */
+}
+.moon-arm{
+  position:absolute;inset:0;
+  border-radius:50%;
+  animation:spin calc(var(--moon-dur) / var(--speed)) linear infinite;
+}
+.moon{
+  position:absolute;left:0;top:50%;
+  transform:translateY(-50%);
+  width:calc(3px + 2px * var(--zoom));    /* ~5px при zoom = 1 */
+  height:calc(3px + 2px * var(--zoom));
+  border-radius:50%;
+  background:#9a9a9a;
+  box-shadow:0 0 6px rgba(180,180,180,.55);
+}
+
+/* ============================================================================
+   ★ БЛОК 6B. ДОБАВЛЕНИЕ 2: ПОЯС АСТЕРОИДОВ (между Марсом и Юпитером) ★
+   ---------------------------------------------------------------------------
+   Контейнер .belt имеет нулевой размер и центрирован в Солнце;
+   каждая точка .asteroid позиционируется в пикселях (left/top) внутри него.
+   Точки генерирует JS: 220 штук с радиусом 272–322px.
+   Кольцо не кликабельно и едва заметно.
+   ============================================================================ */
+.belt{
+  position:absolute;left:50%;top:50%;
+  width:0;height:0;
+  pointer-events:none;               /* чисто декоративный слой */
+}
+.asteroid{
+  position:absolute;
+  border-radius:50%;
+  background:rgba(200,200,200,.4);
+  animation:twinkle 6s ease-in-out infinite;
+}
+
+/* ============================================================================
+   ★ БЛОК 6C. ДОБАВЛЕНИЕ 3: КОМЕТА, ПРОЛЕТАЮЩАЯ ЧЕРЕЗ СЦЕНУ ★
+   ---------------------------------------------------------------------------
+   .comet — светящаяся точка с хвостом-псевдоэлементом.
+   Координаты старта/финиша и длительность задаёт JS (--x0/--y0/--x1/--y1/--dur).
+   Угол поворота --rot вычисляется из направления полёта, чтобы хвост
+   всегда смотрел НАЗАД. После завершения анимации JS удаляет элемент.
+   ============================================================================ */
+.comet{
+  position:absolute;left:0;top:0;
+  width:3px;height:3px;border-radius:50%;
+  background:#fff;z-index:4;
+  box-shadow:
+    0 0 8px 2px rgba(255,255,255,.9),
+    0 0 20px 7px rgba(130,185,255,.45);
+  pointer-events:none;
+  opacity:0;
+  animation:cometFly var(--dur,4s) linear forwards;
+}
+/* Хвост кометы: от прозрачного к белому, прикреплён сзади по локальной оси X */
+.comet::after{
+  content:"";position:absolute;top:50%;right:50%;
+  width:120px;height:2px;
+  transform:translateY(-50%);
+  border-radius:99px;
+  background:linear-gradient(to right,rgba(255,255,255,0),rgba(255,255,255,.8));
+  filter:blur(.3px);
+}
+@keyframes cometFly{
+  0%   {opacity:0;  transform:translate3d(var(--x0),var(--y0),0) rotate(var(--rot,0deg));}
+  8%   {opacity:1;}
+  92%  {opacity:1;}
+  100% {opacity:0;  transform:translate3d(var(--x1),var(--y1),0) rotate(var(--rot,0deg));}
+}
+
+/* Пауза движения сайта (включая Луну, пояс и кометы) */
+body.is-paused .orbit,
+body.is-paused .holder,
+body.is-paused .moon-arm,
+body.is-paused .sun__core,
+body.is-paused .sun__corona,
+body.is-paused .sun__glow,
+body.is-paused .comet{animation-play-state:paused;}
+
+/* ============================================================================
+   БЛОК 6D. МИНИ-ИГРА «НАЙДИ ПЛАНЕТУ» — ВИЗУАЛЬНЫЕ СТИЛИ
+   ============================================================================ */
+.system .planet.is-correct .ball{
+  box-shadow:
+    0 0 0 3px var(--c-good),
+    0 0 30px 8px rgba(74,222,128,.75),
+    inset -3px -3px 6px rgba(0,0,0,.5);
+  animation:pulse .6s ease-in-out infinite;
+}
+.system .planet.is-wrong .ball{
+  box-shadow:
+    0 0 0 3px var(--c-bad),
+    0 0 30px 8px rgba(255,99,105,.7),
+    inset -3px -3px 6px rgba(0,0,0,.5);
+  animation:none;
+}
+.system .orbit.is-hit-good{border-color:rgba(74,222,128,.7);box-shadow:0 0 26px -4px rgba(74,222,128,.6);}
+.system .orbit.is-hit-bad {border-color:rgba(255,99,105,.6);box-shadow:0 0 26px -4px rgba(255,99,105,.55);}
+
+/* Во время игры подписи планет СПРЯТЫ — иначе задание решается чтением */
+body.is-playing .tag{opacity:0 !important;}
+
+.gamebar{
+  display:none;
+  align-items:center;flex-wrap:wrap;gap:10px 18px;
+  margin:0 0 10px;padding:12px clamp(12px,2vw,18px);
+  border:1px solid rgba(255,107,0,.35);
+  border-radius:16px;
+  background:linear-gradient(180deg,rgba(255,107,0,.12),rgba(10,10,21,.65));
+  box-shadow:0 14px 40px -26px rgba(0,0,0,.95), inset 0 0 0 1px rgba(255,255,255,.03);
+}
+.gamebar.is-on{display:flex;animation:gamebarIn .35s cubic-bezier(.22,.75,.3,1) both;}
+@keyframes gamebarIn{from{opacity:0;transform:translateY(-12px);}to{opacity:1;transform:none;}}
+
+.gamebar__task{display:flex;align-items:baseline;gap:8px;min-width:0;}
+.gamebar__label{font-size:.66rem;letter-spacing:.2em;text-transform:uppercase;color:var(--c-muted);}
+.gamebar__name{
+  font-size:clamp(1.05rem,3vw,1.45rem);font-weight:600;color:var(--c-sun);
+  text-shadow:0 0 18px rgba(255,107,0,.45);white-space:nowrap;
+  animation:targetPop .35s ease both;
+}
+@keyframes targetPop{from{opacity:0;transform:translateY(6px) scale(.96);}to{opacity:1;transform:none;}}
+
+.gamebar__stats{display:flex;align-items:center;gap:clamp(8px,1.6vw,18px);margin-left:auto;}
+.stat{display:flex;flex-direction:column;align-items:center;min-width:48px;}
+.stat__k{font-size:.6rem;letter-spacing:.16em;text-transform:uppercase;color:var(--c-muted);}
+.stat__v{font-size:1.05rem;font-weight:600;font-variant-numeric:tabular-nums;}
+.stat__v.is-low{color:var(--c-bad);animation:blink .8s steps(2,end) infinite;}
+@keyframes blink{50%{opacity:.25;}}
+
+.gamebar__bar{
+  flex:1 0 100%;height:4px;border-radius:99px;
+  background:rgba(255,255,255,.1);overflow:hidden;
+}
+.gamebar__bar i{
+  display:block;height:100%;width:100%;border-radius:99px;
+  background:linear-gradient(90deg,#ff6b00,#ffb347);
+  transition:width .2s linear,background .3s ease;
+}
+.gamebar__bar.is-low i{background:linear-gradient(90deg,#ff6369,#ff8f93);}
+
+/* --- Модальное окно результата ------------------------------------------- */
+.modal{
+  position:fixed;inset:0;z-index:50;
+  display:none;place-items:center;padding:20px;
+  background:rgba(6,6,14,.72);
+  backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);
+}
+.modal.is-on{display:grid;animation:fadeIn .25s ease both;}
+.modal__box{
+  width:min(100%,380px);padding:26px 24px;text-align:center;
+  border:1px solid rgba(255,107,0,.4);border-radius:20px;
+  background:linear-gradient(180deg,rgba(28,28,50,.96),rgba(10,10,21,.98));
+  box-shadow:0 30px 80px -30px #000, 0 0 60px -30px rgba(255,107,0,.8);
+  animation:modalIn .35s cubic-bezier(.22,.75,.3,1) both;
+}
+@keyframes modalIn{from{opacity:0;transform:translateY(18px) scale(.97);}to{opacity:1;transform:none;}}
+.modal__box h3{margin:0 0 6px;font-size:1.5rem;font-weight:600;}
+.modal__score{margin:6px 0;font-size:1.15rem;color:rgba(255,255,255,.75);}
+.modal__score b{color:var(--c-sun);font-size:1.6rem;}
+.modal__best{margin:4px 0 0;font-size:.9rem;color:var(--c-muted);}
+.modal__best b{color:var(--c-text);}
+.modal__note{margin:12px 0 0;font-size:.85rem;color:var(--c-good);min-height:1.2em;}
+.modal__note:empty{display:none;}
+.modal__actions{display:flex;gap:10px;justify-content:center;margin-top:18px;flex-wrap:wrap;}
+
+/* --- Кнопки ------------------------------------------------------------- */
+.btn--primary{
+  border-color:rgba(255,107,0,.65);
+  background:linear-gradient(180deg,rgba(255,107,0,.28),rgba(255,107,0,.12));
+  color:#ffd9b3;
+}
+.btn--primary:hover{background:linear-gradient(180deg,rgba(255,107,0,.42),rgba(255,107,0,.2));}
+.btn--stop{
+  padding:6px 12px;font-size:.75rem;
+  border-color:rgba(255,99,105,.5);color:#ffc2c5;background:rgba(255,99,105,.1);
+}
+.btn--stop:hover{background:rgba(255,99,105,.22);}
+body.is-playing .controls.is-locked{opacity:.35;pointer-events:none;filter:grayscale(.5);}
+
+/* ============================================================================
+   БЛОК 7. ИНФОРМАЦИОННАЯ ПАНЕЛЬ
+   ============================================================================ */
+.panel{
+  min-width:0;
+  padding:clamp(16px,2.2vw,24px);
+  border:1px solid var(--c-line);
+  border-radius:18px;
+  background:var(--c-card);
+  backdrop-filter:blur(10px);
+  -webkit-backdrop-filter:blur(10px);
+  box-shadow:0 18px 50px -30px rgba(0,0,0,.9);
+  will-change:transform,opacity;
+}
+.panel.flash{animation:cardIn .35s cubic-bezier(.22,.75,.3,1) both;}
+@keyframes cardIn{
+  from{opacity:0;transform:translateX(28px);}
+  60% {opacity:1;}
+  to  {opacity:1;transform:translateX(0);}
+}
+.panel.flash .fact{animation:factIn .3s ease both;animation-delay:calc(var(--i,0) * .05s + .08s);}
+@keyframes factIn{
+  from{opacity:0;transform:translateY(7px);}
+  to  {opacity:1;transform:translateY(0);}
+}
+
+.panel__top{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;}
+.panel__meta{display:flex;align-items:center;gap:10px;flex:0 0 auto;}
+
+.panel__eyebrow{
+  display:flex;align-items:center;gap:8px;
+  margin:0;font-size:.68rem;letter-spacing:.18em;text-transform:uppercase;
+  color:var(--c-muted);min-width:0;
+}
+.panel__eyebrow::before{
+  content:"";width:9px;height:9px;border-radius:50%;flex:0 0 auto;
+  background:var(--planet-color,var(--c-accent));
+  box-shadow:0 0 10px var(--planet-color,var(--c-accent));
+}
+.panel__index{font-size:.68rem;letter-spacing:.14em;color:rgba(255,255,255,.35);white-space:nowrap;}
+
+.panel__title{
+  margin:.28em 0 .1em;
+  font-size:clamp(1.5rem,4.4vw,2.05rem);font-weight:600;line-height:1.1;
+  color:var(--c-text);
+}
+.panel__sub{margin:0 0 14px;font-size:.8rem;color:rgba(255,255,255,.4);}
+
+.facts{margin:0 0 14px;display:grid;gap:1px;background:var(--c-line);
+       border:1px solid var(--c-line);border-radius:12px;overflow:hidden;}
+.fact{background:rgba(10,10,21,.55);padding:9px 12px;}
+.fact dt{font-size:.63rem;letter-spacing:.14em;text-transform:uppercase;color:var(--c-muted);}
+.fact dd{margin:3px 0 0;font-size:.95rem;color:var(--c-text);}
+
+.panel__text{margin:0;font-size:.92rem;line-height:1.6;color:rgba(255,255,255,.72);}
+.panel__text b{color:#fff;font-weight:600;}
+
+/* --- Навигация ← → в шапке карточки -------------------------------------- */
+.panel__nav{display:flex;align-items:center;gap:6px;flex:0 0 auto;}
+.nav-btn{
+  width:30px;height:30px;
+  display:grid;place-items:center;
+  padding:0;line-height:1;
+  font-size:1rem;font-weight:600;
+  color:rgba(255,255,255,.75);
+  background:rgba(10,10,21,.6);
+  border:1px solid var(--c-line);
+  border-radius:9px;cursor:pointer;
+  transition:background .2s ease,border-color .2s ease,color .2s ease,transform .12s ease,box-shadow .2s ease;
+}
+.nav-btn:hover:not(:disabled){
+  color:#fff;border-color:rgba(255,107,0,.75);
+  background:rgba(255,107,0,.18);
+  box-shadow:0 0 14px -2px rgba(255,107,0,.55);
+}
+.nav-btn:active:not(:disabled){transform:translateY(1px);}
+.nav-btn:focus-visible{outline:2px solid var(--c-accent);outline-offset:2px;}
+.nav-btn:disabled{opacity:.3;cursor:not-allowed;}
+body.is-playing .panel__nav{opacity:.3;pointer-events:none;filter:grayscale(.6);}
+
+/* ============================================================================
+   ★ БЛОК 7A. ДОБАВЛЕНИЕ 4: КНОПКА «ЕЩЁ ФАКТЫ» ★
+   ---------------------------------------------------------------------------
+   Кнопка под основным текстом карточки + блок вывода под ней.
+   При клике показывается СЛУЧАЙНЫЙ ещё не показанный факт из массива
+   data.extras текущего небесного тела. Когда факты кончились —
+   выводится сообщение «Это все факты о планете».
+   ============================================================================ */
+.extras{margin-top:16px;}
+.extras[hidden]{display:none !important;}
+
+.extras__btn{
+  width:100%;
+  padding:9px 14px;border-radius:12px;
+  border:1px solid var(--c-line);
+  background:rgba(10,10,21,.55);
+  color:rgba(255,255,255,.85);
+  font-size:.85rem;letter-spacing:.04em;
+  cursor:pointer;
+  transition:background .2s ease,border-color .2s ease,color .2s ease,box-shadow .2s ease;
+}
+.extras__btn:hover:not(:disabled){
+  color:#fff;
+  border-color:rgba(255,107,0,.7);                 /* оранжевый акцент */
+  background:rgba(255,107,0,.15);
+  box-shadow:0 0 18px -4px rgba(255,107,0,.5);
+}
+.extras__btn:active:not(:disabled){transform:translateY(1px);}
+.extras__btn:focus-visible{outline:2px solid var(--c-accent);outline-offset:2px;}
+.extras__btn:disabled{opacity:.4;cursor:not-allowed;}
+
+.extras__box{
+  margin:10px 0 0;padding:10px 12px;
+  border-left:2px solid rgba(255,107,0,.6);
+  border-radius:0 10px 10px 0;
+  background:rgba(255,255,255,.04);
+  font-size:.88rem;line-height:1.55;
+  color:rgba(255,255,255,.68);
+  animation:factIn .3s ease both;
+}
+.extras__box[hidden]{display:none;}
+.extras__box.is-done{border-left-color:rgba(138,138,163,.8);font-style:italic;}
+
+/* ============================================================================
+   БЛОК 8. УПРАВЛЕНИЕ (КНОПКИ, СЛАЙДЕР, ПОЛНОЭКРАННЫЙ РЕЖИМ)
+   ============================================================================ */
+.controls{
+  display:flex;flex-wrap:wrap;align-items:center;justify-content:center;
+  gap:10px 14px;margin-top:clamp(14px,2.4vw,24px);
+  transition:opacity .3s ease,filter .3s ease;
+}
+.btn{
+  padding:9px 16px;border-radius:999px;
+  border:1px solid var(--c-line);background:rgba(255,255,255,.05);
+  color:var(--c-text);font-size:.85rem;cursor:pointer;
+  transition:background .2s ease,border-color .2s ease,transform .15s ease,color .2s ease;
+}
+.btn:hover{background:rgba(255,255,255,.12);border-color:rgba(255,255,255,.3);}
+.btn:active{transform:translateY(1px);}
+.btn:disabled{opacity:.45;cursor:not-allowed;}
+.btn[aria-pressed="true"]{
+  background:rgba(122,162,255,.18);border-color:rgba(122,162,255,.6);color:#dce7ff;
+}
+.btn:focus-visible{outline:2px solid var(--c-accent);outline-offset:3px;}
+.btn[aria-pressed="true"].btn--full{
+  background:rgba(255,107,0,.18);border-color:rgba(255,107,0,.6);color:#ffd9b3;
+}
+.btn[hidden]{display:none !important;}
+
+.speed{
+  display:flex;align-items:center;gap:9px;
+  padding:7px 16px;border-radius:999px;
+  border:1px solid var(--c-line);background:rgba(255,255,255,.05);
+  font-size:.8rem;color:var(--c-muted);letter-spacing:.06em;
+}
+.speed input{width:120px;accent-color:var(--c-accent);cursor:pointer;}
+.speed output{color:var(--c-text);min-width:34px;text-align:right;font-variant-numeric:tabular-nums;}
+
+.note{
+  margin:16px 0 0;text-align:center;
+  font-size:.72rem;letter-spacing:.08em;color:rgba(255,255,255,.28);
+}
+
+/* ============================================================================
+   БЛОК 9. АДАПТИВНОСТЬ (ТЕЛЕФОНЫ И ПЛАНШЕТЫ)
+   ============================================================================ */
+@media (max-width:900px){
+  .layout{grid-template-columns:minmax(0,1fr);}
+  .panel{position:static;}
+  .speed{width:100%;justify-content:center;}
+  .speed input{flex:1;max-width:180px;}
+}
+@media (max-width:560px){
+  .gamebar{gap:8px 10px;padding:10px 12px;border-radius:14px;}
+  .gamebar__task{width:100%;justify-content:center;}
+  .gamebar__stats{margin-left:0;width:100%;justify-content:space-around;}
+  .stat{min-width:0;}
+  .gamebar__bar{order:9;}
+  .nav-btn{width:36px;height:36px;font-size:1.1rem;}
+  .comet::after{width:70px;}              /* хвост короче на телефоне */
+}
+@media (max-width:480px){
+  .title{letter-spacing:0;}
+  .btn,.speed{padding:8px 13px;font-size:.8rem;}
+  .facts{grid-template-columns:1fr;}
+  .panel.flash{animation-name:cardInMobile;}
+  @keyframes cardInMobile{
+    from{opacity:0;transform:translate(14px,10px);}
+    to  {opacity:1;transform:translate(0,0);}
+  }
+}
+@media (hover:none){
+  .orbit:hover{border-color:var(--c-orbit);box-shadow:none;}
+  .planet:hover{scale:1;}
+  .holder:hover .tag{opacity:.85;}
+  body.is-playing .tag{opacity:0 !important;}
+}
+
+/* ============================================================================
+   БЛОК 10. АНИМАЦИИ (KEYFRAMES)
+   ============================================================================ */
+@keyframes spin{from{transform:rotate(0deg);}to{transform:rotate(360deg);}}
+@keyframes twinkle{0%,100%{opacity:.25;}50%{opacity:1;}}
+@keyframes pulse{0%,100%{scale:.94;opacity:.65;}50%{scale:1.07;opacity:1;}}
+@keyframes fadeIn{from{opacity:0;transform:translateY(10px);}to{opacity:1;transform:none;}}
+@keyframes shoot{
+  0%{transform:rotate(35deg) translate3d(0,0,0);opacity:0;}
+  1.5%{opacity:1;}
+  7%{transform:rotate(35deg) translate3d(110vw,60vh,0);opacity:0;}
+  100%{transform:rotate(35deg) translate3d(110vw,60vh,0);opacity:0;}
+}
+
+/* ============================================================================
+   БЛОК 11. УВАЖЕНИЕ СИСТЕМНОЙ НАСТРОЙКИ «МЕНЬШЕ АНИМАЦИИ»
+   ---------------------------------------------------------------------------
+   Отключаем/упрощаем: падающие звёзды, пульс свечения, появление карточки,
+   каскад строк, мигание таймера, ЛУНУ, мерцание пояса астероидов и КОМЕТЫ.
+   ============================================================================ */
+@media (prefers-reduced-motion: reduce){
+  .star,.shooter,.sun__corona,.sun__glow,.page{animation:none !important;}
+  .sun[aria-pressed="true"]::after{animation:none;}
+  .panel.flash{animation:none !important;}
+  .panel.flash .fact{animation:none !important;}
+  .extras__box{animation:none !important;}
+  .planet[aria-pressed="true"] .ball{animation:none;}
+  .system .planet.is-correct .ball{animation:none;}
+  .gamebar.is-on,.gamebar__name,.modal.is-on,.modal__box{animation:none !important;}
+  .stat__v.is-low{animation:none;}
+  .moon-arm{animation:none !important;}          /* Добавление 1 */
+  .asteroid{animation:none !important;opacity:.4;}/* Добавление 2 */
+  .comet{display:none !important;}                /* Добавление 3 */
+}
+</style>
+</head>
+
+<body>
+
+<!-- ==========================================================================
+     HTML-БЛОК 1. ФОН: ЗВЁЗДЫ И ПАДАЮЩИЕ ЗВЁЗДЫ (наполняются в JS)
+     ========================================================================== -->
+<div class="sky" id="sky" aria-hidden="true">
+  <span class="shooter" style="left:8%;top:4%;animation-delay:1s;animation-duration:11s"></span>
+  <span class="shooter" style="left:62%;top:0%;animation-delay:6s;animation-duration:15s"></span>
+  <span class="shooter" style="left:32%;top:2%;animation-delay:9s;animation-duration:13s"></span>
+</div>
+
+<!-- ==========================================================================
+     HTML-БЛОК 2. СТРАНИЦА
+     ========================================================================== -->
+<main class="page">
+
+  <header class="header">
+    <h1 class="title">Солнечная система</h1>
+    <p class="subtitle">Интерактивное путешествие</p>
+  </header>
+
+  <div class="layout">
+
+    <div class="stage-box" id="stageBox">
+
+      <!-- ПАНЕЛЬ МИНИ-ИГРЫ «НАЙДИ ПЛАНЕТУ» -->
+      <div class="gamebar" id="gamebar" role="status" aria-live="polite">
+        <div class="gamebar__task">
+          <span class="gamebar__label">Найди:</span>
+          <strong class="gamebar__name" id="gTarget">—</strong>
+        </div>
+
+        <div class="gamebar__stats">
+          <div class="stat"><span class="stat__k">Счёт</span><b class="stat__v" id="gScore">0</b></div>
+          <div class="stat"><span class="stat__k">Время</span><b class="stat__v" id="gTime">60</b></div>
+          <div class="stat"><span class="stat__k">Рекорд</span><b class="stat__v" id="gBest">0</b></div>
+          <button class="btn btn--stop" id="stopBtn" type="button">Стоп</button>
+        </div>
+
+        <div class="gamebar__bar" id="gBarWrap"><i id="gBar"></i></div>
+      </div>
+      <!-- /ПАНЕЛЬ ИГРЫ -->
+
+      <!-- СЦЕНА: JS создаёт Солнце, пояс астероидов, орбиты и планеты.
+           Кометы добавляются в эту же сцену поверх системы. -->
+      <div class="stage" id="stage" role="group" aria-label="Солнце и орбиты планет">
+        <div class="system" id="system"></div>
+      </div>
+
+      <p class="hint" id="hint">Нажмите на планету, чтобы увидеть карточку · клавиши ← и → переключают планеты</p>
+    </div>
+
+    <!-- ИНФОРМАЦИОННАЯ КАРТОЧКА -->
+    <aside class="panel" id="panel" aria-live="polite">
+      <div class="panel__top">
+        <p class="panel__eyebrow" id="pType">Планета земной группы</p>
+
+        <div class="panel__meta">
+          <span class="panel__index" id="pIndex">0 / 9</span>
+          <div class="panel__nav">
+            <button class="nav-btn" id="prevBtn" type="button" title="Предыдущее тело (←)" aria-label="Предыдущее небесное тело">←</button>
+            <button class="nav-btn" id="nextBtn" type="button" title="Следующее тело (→)" aria-label="Следующее небесное тело">→</button>
+          </div>
+        </div>
+      </div>
+
+      <h2 class="panel__title" id="pName">Выберите планету</h2>
+      <p class="panel__sub" id="pSub">Солнце и восемь планет</p>
+      <dl class="facts" id="pFacts"></dl>
+      <p class="panel__text" id="pText">Нажмите на любое небесное тело на схеме — здесь появится его диаметр, расстояние от Солнца, год, сутки и несколько любопытных фактов.</p>
+
+      <!-- ★ ДОБАВЛЕНИЕ 4: кнопка «Ещё факты» + блок вывода ★ -->
+      <div class="extras" id="extras" hidden>
+        <button class="extras__btn" id="moreBtn" type="button">Ещё факты</button>
+        <p class="extras__box" id="moreText" hidden></p>
+      </div>
+      <!-- /«ЕЩЁ ФАКТЫ» -->
+    </aside>
+
+  </div>
+
+  <!-- Панель управления сайтом -->
+  <div class="controls" id="controls">
+    <button class="btn btn--primary" id="gameBtn" type="button">Найди планету</button>
+
+    <button class="btn" id="playBtn" type="button" aria-pressed="false">Пауза</button>
+
+    <label class="speed" for="speed">
+      Скорость
+      <input type="range" id="speed" min="0.25" max="4" step="0.25" value="1">
+      <output id="speedOut" for="speed">1×</output>
+    </label>
+
+    <button class="btn" id="labelsBtn" type="button" aria-pressed="true">Подписи</button>
+    <button class="btn" id="resetBtn" type="button">Сброс</button>
+
+    <button class="btn btn--full" id="fsBtn" type="button" aria-pressed="false">На весь экран</button>
+  </div>
+
+  <p class="note">Данные: NASA Planetary Fact Sheet · Чистые HTML, CSS и JavaScript — без библиотек</p>
+
+</main>
+
+<!-- ==========================================================================
+     МОДАЛЬНОЕ ОКНО РЕЗУЛЬТАТА ИГРЫ
+     ========================================================================== -->
+<div class="modal" id="gameModal">
+  <div class="modal__box" role="dialog" aria-modal="true" aria-labelledby="mTitle">
+    <h3 id="mTitle">Игра окончена</h3>
+    <p class="modal__score">Твой счёт: <b id="mScore">0</b></p>
+    <p class="modal__best">Рекорд: <b id="mBest">0</b></p>
+    <p class="modal__note" id="mNote"></p>
+    <div class="modal__actions">
+      <button class="btn btn--primary" id="againBtn" type="button">Играть снова</button>
+      <button class="btn" id="closeBtn" type="button">Закрыть</button>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  /* ==========================================================================
+     JS-БЛОК 1. ДАННЫЕ О СОЛНЦЕ И ПЛАНЕТАХ
+     orbit — радиус орбиты, spin — период оборота, offset — стартовый угол,
+     size — видимый диаметр планеты,
+     moon — (необязательно) спутник: радиус орбиты и период оборота,
+     extras — 2–3 дополнительных факта для кнопки «Ещё факты» (Добавление 4).
+     ========================================================================== */
+  var SUN = {
+    key: 'sun',
+    name: 'Солнце',
+    type: 'Звезда типа G2V',
+    color: '#ff6b00',
+    sub: 'Центр Солнечной системы',
+    facts: [
+      ['Диаметр', '1 392 700 км'],
+      ['Масса', '333 000 земных масс'],
+      ['Температура поверхности', '≈ 5 500 °C'],
+      ['Температура в ядре', '≈ 15 млн °C'],
+      ['Оборот вокруг оси', '25,4 земных суток'],
+      ['Возраст', '≈ 4,6 млрд лет']
+    ],
+    text: 'Солнце содержит около <b>99,86 % всей массы</b> Солнечной системы. Вся его энергия рождается в ядре, где водород превращается в гелий: каждую секунду Солнце теряет около 600 млн тонн массы, превращая её в свет и тепло.',
+    /* ДОБАВЛЕНИЕ 4: дополнительные факты о Солнце */
+    extras: [
+      'Весь свет, который вы видите, покинул Солнце 8 минут 20 секунд назад — свет от ближайшей звезды идёт до Земли именно столько.',
+      'За 1 секунду Солнце превращает около 600 миллионов тонн водорода в гелий; 4 миллиона тонн этой массы превращаются в чистую энергию.',
+      'Магнитные вспышки на Солнце порождают «солнечный ветер» — поток заряженных частиц, который достигает Земли примерно за 3 дня.'
+    ]
+  };
+
+  var PLANETS = [
+    {
+      key: 'mercury', name: 'Меркурий', type: 'Каменная планета', color: '#cfc9bf',
+      orbit: 100, spin: 11, offset: 0.06, size: 10,
+      c1: '#d6d0c6', c2: '#6b655d', glow: 'rgba(215,205,185,.45)',
+      sub: '1-я планета от Солнца',
+      facts: [
+        ['Диаметр', '4 879 км'],
+        ['Расстояние от Солнца', '57,9 млн км · 0,39 а.е.'],
+        ['Год', '88 земных суток'],
+        ['Сутки', '176 земных суток'],
+        ['Спутники', 'нет'],
+        ['Температура', 'от −180 до +430 °C']
+      ],
+      text: 'Самая маленькая и ближайшая к Солнцу планета. Её <b>год короче, чем двое земных суток</b>, а сутки длятся дольше года. Атмосферы нет, поэтому днём поверхность раскаляется, а ночью вымерзает.',
+      extras: [
+        'Несмотря на соседство с Солнцем, на Меркурии есть настоящий лёд: в глубоких кратерах полярных областей вода веками не испарялась.',
+        'Магнитное поле Меркурия в 100 раз слабее земного, но наклонено так сильно, что магнитные полюса планеты почти совпадают с её географическими.',
+        'За один меркурианский год Меркурий делает 1,5 оборота вокруг собственной оси — почти «таранный» эффект из-за резонанса.'
+      ]
+    },
+    {
+      key: 'venus', name: 'Венера', type: 'Каменная планета', color: '#f0d29a',
+      orbit: 150, spin: 18, offset: 0.42, size: 15,
+      c1: '#f6e3b4', c2: '#b4873a', glow: 'rgba(246,220,150,.5)',
+      sub: '2-я планета от Солнца',
+      facts: [
+        ['Диаметр', '12 104 км'],
+        ['Расстояние от Солнца', '108,2 млн км · 0,72 а.е.'],
+        ['Год', '225 земных суток'],
+        ['Сутки', '243 земных суток'],
+        ['Спутники', 'нет'],
+        ['Температура', '≈ +464 °C']
+      ],
+      text: 'Венера вращается <b>в обратную сторону</b>: там Солнце восходит на западе, а день длиннее года. Плотная углекислотная атмосфера создаёт парниковый эффект — на поверхности жарче, чем на Меркурии.',
+      extras: [
+        'Давление на поверхности Венеры в 92 раза выше земного — это как оказаться на глубине 900 метров в океане.',
+        'Облака на Венере состоят из капель серной кислоты, а не воды. Средняя скорость ветра в атмосфере — всего около 1 м/с.',
+        'Это ближайшая к нам планета, на поверхности которой работают советские и американские автоматические станции (Венера-13, Венера-15, Магеллан).'
+      ]
+    },
+    {
+      key: 'earth', name: 'Земля', type: 'Землеподобная планета', color: '#4aa3ff',
+      orbit: 200, spin: 26, offset: 0.70, size: 16,
+      c1: '#6cb8ff', c2: '#1b4f9e', glow: 'rgba(90,170,255,.55)',
+      sub: '3-я планета от Солнца',
+      facts: [
+        ['Диаметр', '12 742 км'],
+        ['Расстояние от Солнца', '149,6 млн км · 1,00 а.е.'],
+        ['Год', '365,25 суток'],
+        ['Сутки', '23 ч 56 мин'],
+        ['Спутники', '1 — Луна'],
+        ['Температура', '≈ +15 °C в среднем']
+      ],
+      text: 'Единственная планета Солнечной системы, где <b>подтверждено существование жизни</b>. Около 71 % её поверхности покрыто океанами жидкой воды, а магнитное поле защищает атмосферу от солнечного ветра.',
+      /* ★ ДОБАВЛЕНИЕ 1: Луна вращается вокруг Земли (не вокруг Солнца).
+         r — радиус орбиты Луны в проектных px, dur — период оборота. */
+      moon: { r: 15, dur: 7 },
+      extras: [
+        'Луна удаляется от Земли примерно на 3,8 см в год — когда-то она была заметно ближе и выглядела на небе намного крупнее.',
+        'Экватор Земли «раздут» вращением: на полюсах диаметр 12 756 км, а на экваторе — 12 756 км против 12 714 км, разница почти 42 км.',
+        'Около 80 % поверхности Земли покрыто океанами, а вся вода вместе с горными ледниками — это 1,3 млрд кубических километров воды.'
+      ]
+    },
+    {
+      key: 'mars', name: 'Марс', type: 'Каменная планета', color: '#ff7a4d',
+      orbit: 260, spin: 34, offset: 0.25, size: 12,
+      c1: '#ff8a5c', c2: '#9c3a19', glow: 'rgba(255,130,80,.5)',
+      sub: '4-я планета от Солнца',
+      facts: [
+        ['Диаметр', '6 779 км'],
+        ['Расстояние от Солнца', '227,9 млн км · 1,52 а.е.'],
+        ['Год', '687 земных суток'],
+        ['Сутки', '24 ч 37 мин'],
+        ['Спутники', '2 — Фобос и Деймос'],
+        ['Температура', 'от −143 до +35 °C']
+      ],
+      text: 'Марс носит имя римского бога войны: его поверхность покрыта оксидами железа — обычной <b>ржавчиной</b>. Здесь стоит Олимп, вулкан высотой почти 22 км, и самый глубокий каньон планеты.',
+      extras: [
+        'На Марсе есть самая большая в Солнечной системе вулканическая кальдера — Олимп диаметром около 600 км и высотой 21,9 км.',
+        'Фобос, самый маленький спутник Марса, поднимается на 1/3 высоты над горизонтом и медленно падает на планету примерно за 30 млн лет.',
+        'На южном полюсе Марса вода спрятана под слоем льда, смешанного с пылью: вулканические изверчения вулкана Элизиум могли заполнить его водой.'
+      ]
+    },
+    {
+      key: 'jupiter', name: 'Юпитер', type: 'Газовый гигант', color: '#e3b183',
+      orbit: 330, spin: 62, offset: 0.60, size: 42, bands: true,
+      c1: '#f0cd9e', c2: '#9d6a34', glow: 'rgba(240,200,150,.5)',
+      sub: '5-я планета от Солнца',
+      facts: [
+        ['Диаметр', '139 820 км'],
+        ['Расстояние от Солнца', '778,5 млн км · 5,20 а.е.'],
+        ['Год', '11,9 земных лет'],
+        ['Сутки', '9 ч 56 мин'],
+        ['Спутники', '95'],
+        ['Температура в облаках', '≈ −145 °C']
+      ],
+      text: 'Юпитер настолько массивен, что в нём поместилось бы <b>более 1 300 Земель</b>. Его мощное притяжение захватывает кометы и астероиды, защищая внутренние планеты. Знаменитый вихрь Большого Красного Пятна наблюдают уже несколько столетий.',
+      extras: [
+        'Магнитное поле Юпитера в 20 000 раз сильнее земного и простирается на миллионы километров — оно искажает радиосигналы космических аппаратов.',
+        'Большое Красное Пятно — гигантский атмосферный вихрь шириной около 16 000 км. В XVII–XIX веках его было видно в небольшой телескоп как красное пятно.',
+        'Юпитер принимает на себя больше комет, чем все остальные планеты вместе взятые: гравитация гиганта либо притягивает их, либо отбрасывает.'
+      ]
+    },
+    {
+      key: 'saturn', name: 'Сатурн', type: 'Газовый гигант', color: '#e8d8a8',
+      orbit: 410, spin: 84, offset: 0.15, size: 36, bands: true, ring: true,
+      c1: '#f3e6bd', c2: '#ab9459', glow: 'rgba(243,230,190,.5)',
+      sub: '6-я планета от Солнца',
+      facts: [
+        ['Диаметр', '116 460 км'],
+        ['Расстояние от Солнца', '1,43 млрд км · 9,58 а.е.'],
+        ['Год', '29,5 земных лет'],
+        ['Сутки', '10 ч 42 мин'],
+        ['Спутники', '146'],
+        ['Температура в облаках', '≈ −178 °C']
+      ],
+      text: 'Кольца Сатурна — это миллиарды кусков <b>льда и камня</b>, растянутые на десятки тысяч километров, но толщиной всего в десятки метров. Они состоят почти на 96 % из водяного льда.',
+      extras: [
+        'Плотность Сатурна 0,687 г/см³ — меньше плотности воды. Если бы существовала достаточно большая ванна, Сатурн всплыл бы в ней.',
+        'В северном полушарии у Сатурна наблюдается шестиугольный полярный вихрь диаметром около 30 000 км — гигантский «шестиугольник».',
+        'Титан, крупнейший спутник Сатурна, — единственный в Солнечной системе с плотной атмосферой и с жидкими озёрами из метана и этана.'
+      ]
+    },
+    {
+      key: 'uranus', name: 'Уран', type: 'Ледяной гигант', color: '#8fe3e8',
+      orbit: 500, spin: 104, offset: 0.80, size: 26, ring: 'thin',
+      c1: '#a8eef2', c2: '#3f92a2', glow: 'rgba(150,230,240,.5)',
+      sub: '7-я планета от Солнца',
+      facts: [
+        ['Диаметр', '50 724 км'],
+        ['Расстояние от Солнца', '2,87 млрд км · 19,2 а.е.'],
+        ['Год', '84 земных года'],
+        ['Сутки', '17 ч 14 мин'],
+        ['Спутники', '28'],
+        ['Температура в облаках', '≈ −224 °C']
+      ],
+      text: 'Уран вращается <b>лёжа на боку</b>: его ось наклонена почти на 98°, поэтому полюса по 42 года находятся в непрерывном полярном дне, а потом столько же — в ночи. Это самая холодная планета системы.',
+      extras: [
+        'Минимальная температура Урана −224 °C — холоднее, чем на далёком Нептуне: планета почти не получает тепла от Солнца.',
+        'Титен, крупнейший спутник Урана, покрыт тёмным органическим «снегом» и имеет каньоны глубиной до 20 км — в 10 раз глубже Гранд-Каньона.',
+        'Это единственная планета, которая вращается вокруг своей оси почти «лёжа на боку» — результат, вероятно, древнего столкновения с крупным телом.'
+      ]
+    },
+    {
+      key: 'neptune', name: 'Нептун', type: 'Ледяной гигант', color: '#5b7cff',
+      orbit: 600, spin: 124, offset: 0.35, size: 24,
+      c1: '#7d95ff', c2: '#22409f', glow: 'rgba(110,140,255,.55)',
+      sub: '8-я планета от Солнца',
+      facts: [
+        ['Диаметр', '49 244 км'],
+        ['Расстояние от Солнца', '4,50 млрд км · 30,1 а.е.'],
+        ['Год', '165 земных лет'],
+        ['Сутки', '16 ч 6 мин'],
+        ['Спутники', '16'],
+        ['Температура в облаках', '≈ −214 °C']
+      ],
+      text: 'Нептун был найден <b>сначала на бумаге</b>: его орбиту вычислили по отклонениям в движении Урана, и лишь потом телескоп увидел планету. Здесь дуют самые быстрые ветры Солнечной системы — до 2 100 км/ч.',
+      extras: [
+        'Нептун был открыт 23 сентября 1846 года — сначала математически, по отклонениям в движении Урана, и лишь затем в телескоп на расстоянии 150 млн км.',
+        'Спутник Тритон движется по орбите напротив вращения Нептуна и имеет на поверхности гейзеры из азота — там идут извержения в холодном мире.',
+        'За год Нептуна (165 земных лет) мы успеваем «поймать» его лишь на кадре: телескопы «Кассини» и «Вояджер» видели его всего несколько раз вблизи.'
+      ]
+    }
+  ];
+
+  /* ==========================================================================
+     JS-БЛОК 2. ССЫЛКИ НА ЭЛЕМЕНТЫ СТРАНИЦЫ И СОСТОЯНИЕ
+     ========================================================================== */
+  var root = document.documentElement;
+  var body = document.body;
+  var system = document.getElementById('system');
+  var stage = document.getElementById('stage');
+  var stageBox = document.getElementById('stageBox');
+  var panel = document.getElementById('panel');
+  var hint = document.getElementById('hint');
+
+  var pType = document.getElementById('pType');
+  var pName = document.getElementById('pName');
+  var pSub = document.getElementById('pSub');
+  var pFacts = document.getElementById('pFacts');
+  var pText = document.getElementById('pText');
+  var pIndex = document.getElementById('pIndex');
+
+  var prevBtn = document.getElementById('prevBtn');
+  var nextBtn = document.getElementById('nextBtn');
+
+  /* ★ ДОБАВЛЕНИЕ 4: элементы блока «Ещё факты» */
+  var extrasBox = document.getElementById('extras');
+  var moreBtn = document.getElementById('moreBtn');
+  var moreText = document.getElementById('moreText');
+
+  var controls = document.getElementById('controls');
+  var playBtn = document.getElementById('playBtn');
+  var speedInput = document.getElementById('speed');
+  var speedOut = document.getElementById('speedOut');
+  var labelsBtn = document.getElementById('labelsBtn');
+  var resetBtn = document.getElementById('resetBtn');
+  var gameBtn = document.getElementById('gameBtn');
+  var fsBtn = document.getElementById('fsBtn');
+
+  var gamebar = document.getElementById('gamebar');
+  var gTarget = document.getElementById('gTarget');
+  var gScore  = document.getElementById('gScore');
+  var gTime   = document.getElementById('gTime');
+  var gBest   = document.getElementById('gBest');
+  var gBar    = document.getElementById('gBar');
+  var gBarWrap= document.getElementById('gBarWrap');
+  var stopBtn = document.getElementById('stopBtn');
+  var gameModal = document.getElementById('gameModal');
+  var mScore = document.getElementById('mScore');
+  var mBest  = document.getElementById('mBest');
+  var mNote  = document.getElementById('mNote');
+  var againBtn = document.getElementById('againBtn');
+  var closeBtn = document.getElementById('closeBtn');
+
+  var ALL = [SUN].concat(PLANETS);
+
+  var selected = null;
+  var lastAnimatedKey = null;
+
+  /* Хранилище уже показанных «дополнительных фактов»: { key: [индексы] } */
+  var shownExtras = {};
+
+  /* ==========================================================================
+     JS-БЛОК 3. ПОСТРОЕНИЕ СОЛНЦА, ОРБИТ, ПЛАНЕТ, ЛУНЫ И ПОЯСА АСТЕРОИДОВ
+     ========================================================================== */
+  function buildSun() {
+    var sun = document.createElement('button');
+    sun.type = 'button';
+    sun.className = 'sun';
+    sun.dataset.key = 'sun';
+    sun.setAttribute('aria-label', 'Солнце — показать информацию');
+    sun.setAttribute('aria-pressed', 'false');
+    sun.innerHTML =
+      '<span class="sun__glow"></span>' +
+      '<span class="sun__corona"></span>' +
+      '<span class="sun__core"></span>';
+    system.appendChild(sun);
+  }
+
+  /* ★ ДОБАВЛЕНИЕ 1: маленькая орбита Луны внутри держателя Земли ★
+     Вставляется в .holder (который центрирует планету), поэтому Луна
+     вращается вокруг ЗЕМЛИ, а не вокруг Солнца. Разметка:
+        .moon-orbit  — центровка по шарику Земли (top = 16px × zoom)
+        .moon-arm    — вращается (тот же @keyframes spin, что и орбиты)
+        .moon        — сам спутник, ~5px, #9a9a9a, без подписи, не кликабелен */
+  function buildMoon(holder, cfg) {
+    var orbit = document.createElement('span');
+    orbit.className = 'moon-orbit';
+    orbit.style.width = (cfg.r * 2) + 'px';
+    orbit.style.height = (cfg.r * 2) + 'px';
+    orbit.setAttribute('aria-hidden', 'true');
+
+    var arm = document.createElement('span');
+    arm.className = 'moon-arm';
+    arm.style.setProperty('--moon-dur', cfg.dur + 's');
+
+    var moon = document.createElement('span');
+    moon.className = 'moon';
+    moon.title = 'Луна';
+
+    arm.appendChild(moon);
+    orbit.appendChild(arm);
+    holder.appendChild(orbit);
+  }
+
+  function buildOrbit(p) {
+    var orbit = document.createElement('div');
+    orbit.className = 'orbit';
+    orbit.style.setProperty('--r', p.orbit + 'px');
+    orbit.style.setProperty('--spin', p.spin + 's');
+    orbit.style.setProperty('--delay', (-(p.spin * p.offset)).toFixed(2) + 's');
+
+    var holder = document.createElement('div');
+    holder.className = 'holder';
+
+    var btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'planet' + (p.bands ? ' planet--bands' : '') + (p.ring ? ' planet--ring' : '') + (p.ring === 'thin' ? ' planet--thin' : '');
+    btn.dataset.key = p.key;
+    btn.dataset.label = p.name;
+    btn.style.setProperty('--d', p.size + 'px');
+    btn.style.setProperty('--c1', p.c1);
+    btn.style.setProperty('--c2', p.c2);
+    btn.style.setProperty('--glow', p.glow);
+    btn.setAttribute('aria-label', p.name + ' — показать информацию');
+    btn.setAttribute('aria-pressed', 'false');
+
+    var ball = document.createElement('span');
+    ball.className = 'ball';
+    btn.appendChild(ball);
+
+    var tag = document.createElement('span');
+    tag.className = 'tag';
+    tag.textContent = p.name;
+
+    holder.appendChild(btn);
+    holder.appendChild(tag);
+
+    /* Если у планеты есть спутник — добавляем Луну (Добавление 1) */
+    if (p.moon) buildMoon(holder, p.moon);
+
+    orbit.appendChild(holder);
+    system.appendChild(orbit);
+  }
+
+  /* ★ ДОБАВЛЕНИЕ 2: ПОЯС АСТЕРОИДОВ ★
+     Между орбитой Марса (260px) и Юпитера (330px) генерируем 220 точек
+     радиусом 272–322px. Контейнер нулевого размера, центрирован в Солнце;
+     каждая точка ставится абсолютными left/top в проектных пикселях. */
+  var BELT = { inner: 272, outer: 322, count: 220 };
+  function buildBelt() {
+    var belt = document.createElement('div');
+    belt.className = 'belt';
+    belt.setAttribute('aria-hidden', 'true');
+    var frag = document.createDocumentFragment();
+
+    for (var i = 0; i < BELT.count; i++) {
+      var a = Math.random() * Math.PI * 2;                 /* угол */
+      var rad = BELT.inner + Math.random() * (BELT.outer - BELT.inner);
+      var x = Math.cos(a) * rad;
+      var y = Math.sin(a) * rad;
+      var size = 1 + Math.random() * 1.4;                  /* 1–2.4px */
+
+      var dot = document.createElement('span');
+      dot.className = 'asteroid';
+      dot.style.left = x.toFixed(1) + 'px';
+      dot.style.top = y.toFixed(1) + 'px';
+      dot.style.width = size.toFixed(2) + 'px';
+      dot.style.height = size.toFixed(2) + 'px';
+      dot.style.opacity = (0.15 + Math.random() * 0.4).toFixed(2);
+      dot.style.animationDuration = (4 + Math.random() * 5).toFixed(2) + 's';
+      dot.style.animationDelay = (-Math.random() * 9).toFixed(2) + 's';
+      frag.appendChild(dot);
+    }
+    belt.appendChild(frag);
+    system.appendChild(belt);
+  }
+
+  function buildSystem() {
+    buildSun();
+    buildBelt();          /* пояс астероидов — сразу после Солнца */
+    PLANETS.forEach(buildOrbit);
+  }
+
+  /* ==========================================================================
+     JS-БЛОК 4. ЗВЁЗДНОЕ ПОЛЕ (генерация точек)
+     ========================================================================== */
+  function buildStars() {
+    var sky = document.getElementById('sky');
+    var frag = document.createDocumentFragment();
+
+    for (var i = 0; i < 170; i++) {
+      var star = document.createElement('span');
+      var size = Math.random() * 2 + 1;
+      var r = Math.random();
+
+      star.className = 'star' + (r > 0.9 ? ' star--warm' : (r < 0.12 ? ' star--blue' : ''));
+      star.style.width = size.toFixed(2) + 'px';
+      star.style.height = size.toFixed(2) + 'px';
+      star.style.left = (Math.random() * 100).toFixed(2) + '%';
+      star.style.top = (Math.random() * 100).toFixed(2) + '%';
+      star.style.opacity = (Math.random() * 0.6 + 0.25).toFixed(2);
+      star.style.animationDuration = (Math.random() * 4 + 3).toFixed(2) + 's';
+      star.style.animationDelay = (-Math.random() * 6).toFixed(2) + 's';
+      frag.appendChild(star);
+    }
+    sky.appendChild(frag);
+  }
+
+  /* ==========================================================================
+     ★ JS-БЛОК 5. ДОБАВЛЕНИЕ 3: КОМЕТЫ ★
+     ---------------------------------------------------------------------------
+     Каждые 20–30 секунд создаётся элемент .comet внутри .stage:
+       • старт и финиш выбираются ЗА пределами сцены (сцена обрезана
+         overflow:hidden, поэтому появление и исчезновение не видны);
+       • длительность 3–5 с, направление одно из четырёх диагональных;
+       • --rot — угол вектора движения, чтобы хвост смотрел назад;
+       • по animationend элемент удаляется из DOM, плюс страховочный таймер.
+     При prefers-reduced-motion: reduce кометы не создаются вовсе.
+     ========================================================================== */
+  var reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  var cometTimer = null;
+
+  function spawnComet() {
+    if (reduceMotion) return;                 /* уважаем настройки движения */
+
+    var w = stage.clientWidth || 600;
+    var h = stage.clientHeight || 300;
+    var m = 90;                                /* запас за границей сцены */
+    var off = 20 + Math.random() * 60;         /* случайный сдвиг траектории */
+
+    /* Четыре возможных диагональных направления: [x0,y0,x1,y1] */
+    var dirs = [
+      [-m, -off, w + m, h + off],              /* сверху слева направо вниз  */
+      [w + m, -off, -m, h + off],              /* справа налево и вниз       */
+      [-m, h + off, w + m, -off],              /* снизу вверх               */
+      [w + m, h + off, -m, -off]               /* снизу вверх в другую сторону */
+    ];
+    var d = dirs[Math.floor(Math.random() * dirs.length)];
+    var dur = 3 + Math.random() * 2;           /* 3–5 секунд */
+    var angle = Math.atan2(d[3] - d[1], d[2] - d[0]) * 180 / Math.PI;
+
+    var comet = document.createElement('span');
+    comet.className = 'comet';
+    comet.setAttribute('aria-hidden', 'true');
+    comet.style.setProperty('--x0', d[0].toFixed(1) + 'px');
+    comet.style.setProperty('--y0', d[1].toFixed(1) + 'px');
+    comet.style.setProperty('--x1', d[2].toFixed(1) + 'px');
+    comet.style.setProperty('--y1', d[3].toFixed(1) + 'px');
+    comet.style.setProperty('--rot', angle.toFixed(2) + 'deg');
+    comet.style.setProperty('--dur', dur.toFixed(2) + 's');
+
+    function remove() {
+      if (comet.parentNode) comet.parentNode.removeChild(comet);
+      clearTimeout(guard);
+    }
+    /* Страховка: если анимация не сработала (например, пауза/скрытая вкладка) */
+    var guard = setTimeout(remove, (dur * 1000) + 800);
+
+    comet.addEventListener('animationend', remove);
+    stage.appendChild(comet);
+  }
+
+  function scheduleComet() {
+    if (cometTimer) clearTimeout(cometTimer);
+    if (reduceMotion) return;
+    cometTimer = setTimeout(function () {
+      spawnComet();
+      scheduleComet();                       /* планируем следующую через 20–30 с */
+    }, 20000 + Math.random() * 10000);
+  }
+
+  /* ==========================================================================
+     JS-БЛОК 6. МАСШТАБИРОВАНИЕ СЦЕНЫ ПОД РАЗМЕР ЭКРАНА
+     ========================================================================== */
+  function fitSystem() {
+    var size = parseFloat(getComputedStyle(root).getPropertyValue('--sys-size')) || 1280;
+    var available = stageBox.clientWidth - 2;
+    var maxHeight = Math.max(300, Math.min(window.innerHeight * 0.74, 700));
+
+    var scale = Math.min(1, available / size, maxHeight / size);
+    scale = Math.max(scale, 0.18);
+
+    root.style.setProperty('--scale', scale.toFixed(4));
+    root.style.setProperty('--zoom', Math.min(1.9, Math.max(1, 1 / Math.pow(scale, 0.65))).toFixed(3));
+    root.style.setProperty('--label-scale', Math.min(1.8, Math.max(1, 1 / Math.pow(scale, 0.8))).toFixed(3));
+    body.classList.toggle('compact', scale < 0.55);
+  }
+
+  var resizeTimer = null;
+  window.addEventListener('resize', function () {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(fitSystem, 120);
+  }, { passive: true });
+  window.addEventListener('orientationchange', function () {
+    fitSystem();
+    syncFsButton();
+  });
+
+  /* ==========================================================================
+     JS-БЛОК 7. КАРТОЧКА ТЕЛА СОЛНЕЧНОЙ СИСТЕМЫ
+     showInfo() идемпотентна: повторный вызов с тем же ключом отсекается.
+     ========================================================================== */
+  function findBody(key) {
+    for (var n = 0; n < ALL.length; n++) {
+      if (ALL[n].key === key) return { data: ALL[n], index: n };
+    }
+    return null;
+  }
+
+  function renderFacts(list) {
+    pFacts.innerHTML = list.map(function (f, i) {
+      return '<div class="fact" style="--i:' + i + '"><dt>' + f[0] + '</dt><dd>' + f[1] + '</dd></div>';
+    }).join('');
+  }
+
+  function replayCardAnimation() {
+    panel.classList.remove('flash');
+    void panel.offsetWidth;
+    panel.classList.add('flash');
+  }
+
+  function showInfo(key) {
+    if (key === selected) return;
+
+    var found = findBody(key);
+    if (!found) return;
+
+    var data = found.data;
+    selected = key;
+
+    pType.textContent = data.type;
+    pName.textContent = data.name;
+    pSub.textContent = data.sub;
+    pIndex.textContent = (found.index + 1) + ' / ' + ALL.length;
+    panel.style.setProperty('--planet-color', data.color);
+    renderFacts(data.facts);
+    pText.innerHTML = data.text;
+
+    /* ★ ДОБАВЛЕНИЕ 4: сбрасываем блок «Ещё факты» для нового тела */
+    resetExtras(data);
+
+    var buttons = system.querySelectorAll('.planet, .sun');
+    for (var j = 0; j < buttons.length; j++) {
+      buttons[j].setAttribute('aria-pressed', buttons[j].dataset.key === key ? 'true' : 'false');
+    }
+    var orbits = system.querySelectorAll('.orbit');
+    for (var k = 0; k < orbits.length; k++) {
+      var inner = orbits[k].querySelector('.planet');
+      orbits[k].classList.toggle('is-active', !!inner && inner.dataset.key === key);
+    }
+
+    if (lastAnimatedKey !== key) {
+      lastAnimatedKey = key;
+      replayCardAnimation();
+    }
+  }
+
+  function resetInfo() {
+    selected = null;
+    lastAnimatedKey = null;
+    pType.textContent = 'Планета земной группы';
+    pName.textContent = 'Выберите планету';
+    pSub.textContent = 'Солнце и восемь планет';
+    pIndex.textContent = '0 / ' + ALL.length;
+    panel.style.setProperty('--planet-color', 'var(--c-accent)');
+    pFacts.innerHTML = '';
+    panel.classList.remove('flash');
+    pText.textContent = 'Нажмите на любое небесное тело на схеме — здесь появится его диаметр, расстояние от Солнца, год, сутки и несколько любопытных фактов.';
+
+    /* Блок «Ещё факты» прячем, пока не выбрано тело */
+    extrasBox.hidden = true;
+    moreBtn.disabled = true;
+    moreText.hidden = true;
+    moreText.textContent = '';
+    moreText.classList.remove('is-done');
+
+    var buttons = system.querySelectorAll('.planet, .sun');
+    for (var j = 0; j < buttons.length; j++) buttons[j].setAttribute('aria-pressed', 'false');
+    var orbits = system.querySelectorAll('.orbit');
+    for (var k = 0; k < orbits.length; k++) orbits[k].classList.remove('is-active');
+  }
+
+  /* ==========================================================================
+     ★ JS-БЛОК 7A. ДОБАВЛЕНИЕ 4: ЛОГИКА КНОПКИ «ЕЩЁ ФАКТЫ» ★
+     ---------------------------------------------------------------------------
+     • shownExtras[key] хранит индексы уже показанных фактов;
+     • resetExtras(data) — при смене небесного тела очищаем историю;
+     • showNextExtra() — берём СЛУЧАЙНЫЙ ещё не показанный факт;
+       если таких больше нет — выводим «Это все факты о планете»;
+     • блок анимируется коротким fadeIn (перезапуск через reflow).
+     Работает одинаково для Солнца и для всех восьми планет.
+     ========================================================================== */
+  function resetExtras(data) {
+    shownExtras[data.key] = [];
+    extrasBox.hidden = false;
+    moreBtn.disabled = false;
+    moreText.hidden = true;
+    moreText.textContent = '';
+    moreText.classList.remove('is-done');
+  }
+
+  function showNextExtra() {
+    var found = selected ? findBody(selected) : null;
+    if (!found) return;
+
+    var data = found.data;
+    var list = (data.extras && data.extras.length) ? data.extras : null;
+
+    if (!list) {
+      moreText.hidden = false;
+      moreText.classList.add('is-done');
+      moreText.textContent = 'Дополнительных фактов пока нет.';
+      return;
+    }
+
+    var used = shownExtras[data.key] || (shownExtras[data.key] = []);
+    var left = [];
+    for (var i = 0; i < list.length; i++) {
+      if (used.indexOf(i) === -1) left.push(i);
+    }
+
+    moreText.hidden = false;
+    if (left.length === 0) {
+      /* Все факты этого тела уже показаны */
+      moreText.classList.add('is-done');
+      moreText.textContent = 'Это все факты о планете';
+    } else {
+      var pick = left[Math.floor(Math.random() * left.length)];
+      used.push(pick);
+      moreText.classList.remove('is-done');
+      moreText.textContent = list[pick];
+    }
+
+    /* Перезапуск анимации появления блока */
+    moreText.style.animation = 'none';
+    void moreText.offsetWidth;
+    moreText.style.animation = '';
+  }
+
+  moreBtn.addEventListener('click', showNextExtra);
+
+  /* ==========================================================================
+     JS-БЛОК 7B. НАВИГАЦИЯ ПО КАРТОЧКЕ ← →
+     Единая функция stepBody используется кнопками карточки и клавишами.
+     Во время игры «Найди планету» навигация заблокирована.
+     ========================================================================== */
+  function stepBody(step) {
+    if (G.active) return;
+
+    var current = 0;
+    for (var i = 0; i < ALL.length; i++) {
+      if (ALL[i].key === selected) { current = i; break; }
+    }
+    var next = (current + step + ALL.length) % ALL.length;
+
+    showInfo(ALL[next].key);
+
+    var target = system.querySelector('[data-key="' + ALL[next].key + '"]');
+    if (target && target.focus) target.focus();
+  }
+
+  prevBtn.addEventListener('click', function () { stepBody(-1); });
+  nextBtn.addEventListener('click', function () { stepBody(1); });
+
+  function lockNav(locked) {
+    prevBtn.disabled = locked;
+    nextBtn.disabled = locked;
+  }
+
+  /* ==========================================================================
+     JS-БЛОК 8. УПРАВЛЕНИЕ САЙТОМ: ПАУЗА, СКОРОСТЬ, ПОДПИСИ, СБРОС
+     ========================================================================== */
+  var orbitAnims = [];
+  var useWA = typeof document.getAnimations === 'function';
+
+  function collectAnims() {
+    if (!useWA) return;
+    /* .moon-arm добавлен, чтобы ползунок скорости управлял и вращением Луны */
+    var nodes = system.querySelectorAll('.orbit, .holder, .moon-arm');
+    orbitAnims = [];
+    for (var i = 0; i < nodes.length; i++) {
+      var list = nodes[i].getAnimations();
+      for (var j = 0; j < list.length; j++) orbitAnims.push(list[j]);
+    }
+  }
+
+  function setSpeed(value) {
+    var v = Math.max(0.25, Math.min(4, value));
+    root.style.setProperty('--speed', v);
+    speedOut.textContent = (v % 1 === 0 ? v.toFixed(0) : v.toFixed(2).replace(/0$/, '')) + '×';
+    for (var i = 0; i < orbitAnims.length; i++) orbitAnims[i].playbackRate = v;
+  }
+
+  function setPaused(paused) {
+    body.classList.toggle('is-paused', paused);
+    playBtn.setAttribute('aria-pressed', paused ? 'true' : 'false');
+    playBtn.textContent = paused ? '▶ Продолжить' : 'Пауза';
+    for (var i = 0; i < orbitAnims.length; i++) {
+      if (paused) orbitAnims[i].pause(); else orbitAnims[i].play();
+    }
+  }
+
+  playBtn.addEventListener('click', function () {
+    setPaused(!body.classList.contains('is-paused'));
+  });
+
+  speedInput.addEventListener('input', function () {
+    setSpeed(parseFloat(speedInput.value));
+  });
+
+  labelsBtn.addEventListener('click', function () {
+    var hidden = body.classList.toggle('no-labels');
+    labelsBtn.setAttribute('aria-pressed', hidden ? 'false' : 'true');
+  });
+
+  resetBtn.addEventListener('click', function () {
+    resetInfo();
+    setPaused(false);
+  });
+
+  /* ==========================================================================
+     JS-БЛОК 8A. ПОЛНОЭКРАННЫЙ РЕЖИМ
+     ========================================================================== */
+  var fsRequest = null, fsExit = null, fsElement = null, fsEnabled = null;
+  var fsLabelOn  = '⛶ Выйти из полноэкранного';
+  var fsLabelOff = '⛶ На весь экран';
+
+  (function detectFullscreen() {
+    var d = document;
+    fsElement = d.documentElement;
+
+    if (fsElement && typeof fsElement.requestFullscreen === 'function') {
+      fsRequest = function () { return fsElement.requestFullscreen(); };
+    } else if (fsElement && typeof fsElement.webkitRequestFullscreen === 'function') {
+      fsRequest = function () { return fsElement.webkitRequestFullscreen(); };
+    } else if (fsElement && typeof fsElement.mozRequestFullScreen === 'function') {
+      fsRequest = function () { return fsElement.mozRequestFullScreen(); };
+    } else if (fsElement && typeof fsElement.msRequestFullscreen === 'function') {
+      fsRequest = function () { return fsElement.msRequestFullscreen(); };
+    }
+
+    if (d && typeof d.exitFullscreen === 'function') {
+      fsExit = function () { return d.exitFullscreen(); };
+    } else if (d && typeof d.webkitExitFullscreen === 'function') {
+      fsExit = function () { return d.webkitExitFullscreen(); };
+    } else if (d && typeof d.mozCancelFullScreen === 'function') {
+      fsExit = function () { return d.mozCancelFullScreen(); };
+    } else if (d && typeof d.msExitFullscreen === 'function') {
+      fsExit = function () { return d.msExitFullscreen(); };
+    }
+
+    fsEnabled = !!fsRequest;
+    if (!fsEnabled && fsBtn) fsBtn.hidden = true;   /* нет поддержки — прячем кнопку */
+  })();
+
+  function isFullscreen() {
+    var d = document;
+    return !!(d.fullscreenElement || d.webkitFullscreenElement ||
+              d.mozFullScreenElement || d.msFullscreenElement);
+  }
+
+  function syncFsButton() {
+    if (!fsEnabled || !fsBtn) return;
+    var on = isFullscreen();
+    fsBtn.textContent = on ? fsLabelOn : fsLabelOff;
+    fsBtn.setAttribute('aria-pressed', on ? 'true' : 'false');
+    fsBtn.setAttribute('aria-label', on ? 'Выйти из полноэкранного режима' : 'Включить полноэкранный режим');
+  }
+
+  if (fsEnabled && fsBtn) {
+    fsBtn.textContent = fsLabelOff;
+    fsBtn.addEventListener('click', function () {
+      if (isFullscreen()) {
+        if (fsExit) { try { fsExit(); } catch (e) {} }
+      } else if (fsRequest) {
+        try {
+          var p = fsRequest();
+          if (p && typeof p.catch === 'function') p.catch(function () {});
+        } catch (e) {}
+      }
+    });
+
+    ['fullscreenchange', 'webkitfullscreenchange', 'mozfullscreenchange', 'MSFullscreenChange']
+      .forEach(function (type) { document.addEventListener(type, syncFsButton); });
+
+    window.addEventListener('load', syncFsButton);
+    window.addEventListener('focus', syncFsButton);
+  }
+
+  /* ==========================================================================
+     JS-БЛОК 9. МИНИ-ИГРА «НАЙДИ ПЛАНЕТУ»
+     ========================================================================== */
+  var GAME_TIME = 60;
+  var BEST_KEY  = 'solarQuizBest';
+
+  var G = {
+    active:false, score:0, time:0, target:null,
+    lock:false, best:0, endAt:0, tickId:null
+  };
+
+  function loadBest() {
+    try {
+      var v = parseInt(window.localStorage.getItem(BEST_KEY) || '0', 10);
+      return isNaN(v) ? 0 : v;
+    } catch (e) { return 0; }
+  }
+  function saveBest(v) {
+    try { window.localStorage.setItem(BEST_KEY, String(v)); } catch (e) {}
+  }
+
+  function lockControls(locked) {
+    controls.classList.toggle('is-locked', locked);
+    var toLock = [playBtn, labelsBtn, resetBtn, speedInput];
+    for (var i = 0; i < toLock.length; i++) {
+      if (toLock[i]) toLock[i].disabled = locked;
+    }
+    lockNav(locked);
+  }
+
+  function hideNamesForGame(hide) {
+    var planets = system.querySelectorAll('.planet');
+    for (var i = 0; i < planets.length; i++) {
+      planets[i].setAttribute('aria-label', hide
+        ? 'Планета — угадайте по внешнему виду'
+        : planets[i].dataset.label + ' — показать информацию');
+    }
+  }
+
+  /* randomTarget(): работаем с КЛЮЧАМИ (строками), а не с объектами. */
+  function randomTarget() {
+    var list = PLANETS;
+    if (!list || typeof list.length !== 'number' || list.length === 0) return null;
+
+    var prev = G.target;
+    var prevKey = (prev && typeof prev.key === 'string') ? prev.key : null;
+
+    if (list.length === 1) return (list[0] && list[0].key) ? list[0] : null;
+
+    var picked = null, i;
+    for (i = 0; i < 30; i++) {
+      var cand = list[Math.floor(Math.random() * list.length)];
+      if (cand && typeof cand.key === 'string' && cand.key !== prevKey) { picked = cand; break; }
+    }
+    if (!picked) {
+      for (i = 0; i < list.length; i++) {
+        if (list[i] && typeof list[i].key === 'string' && list[i].key !== prevKey) { picked = list[i]; break; }
+      }
+    }
+    if (!picked) picked = (list[0] && list[0].key) ? list[0] : null;
+    return picked;
+  }
+
+  function newTask() {
+    var p = randomTarget();
+    if (!p || typeof p !== 'object' || typeof p.name !== 'string') {
+      p = (PLANETS && PLANETS.length) ? PLANETS[0] : null;
+    }
+    if (!p || typeof p.name !== 'string') { G.target = null; gTarget.textContent = '—'; return; }
+    G.target = p;
+    gTarget.textContent = p.name;
+    gTarget.style.animation = 'none';
+    void gTarget.offsetWidth;
+    gTarget.style.animation = '';
+  }
+
+  function paintStats() {
+    gScore.textContent = G.score;
+    gBest.textContent = G.best;
+    gTime.textContent = G.time;
+    var ratio = Math.max(0, G.time / GAME_TIME);
+    gBar.style.width = (ratio * 100).toFixed(2) + '%';
+    var low = G.time <= 10;
+    gTime.classList.toggle('is-low', low);
+    gBarWrap.classList.toggle('is-low', low);
+  }
+
+  function startTimer() {
+    G.endAt = Date.now() + GAME_TIME * 1000;
+    G.time = GAME_TIME;
+    G.tickId = setInterval(function () {
+      if (!G.active) return;
+      var left = Math.max(0, Math.ceil((G.endAt - Date.now()) / 1000));
+      if (left !== G.time) { G.time = left; paintStats(); }
+      if (G.time <= 0) endGame(true);
+    }, 120);
+    paintStats();
+  }
+
+  function stopTimer() {
+    if (G.tickId) { clearInterval(G.tickId); G.tickId = null; }
+  }
+
+  function flashAnswer(btn, isCorrect) {
+    var orbit = btn.closest ? btn.closest('.orbit') : null;
+    btn.classList.add(isCorrect ? 'is-correct' : 'is-wrong');
+    if (orbit) orbit.classList.add(isCorrect ? 'is-hit-good' : 'is-hit-bad');
+    setTimeout(function () {
+      btn.classList.remove('is-correct', 'is-wrong');
+      if (orbit) orbit.classList.remove('is-hit-good', 'is-hit-bad');
+    }, 1000);
+  }
+
+  function handleGameClick(btn) {
+    if (!btn.classList.contains('planet')) return;   /* Солнце в игре не учитывается */
+    if (G.lock || !G.active) return;
+
+    if (!G.target || typeof G.target.key !== 'string') {
+      newTask();
+      if (!G.target) return;
+    }
+
+    if (btn.dataset.key === G.target.key) {
+      G.score++;
+      paintStats();
+      flashAnswer(btn, true);
+      G.lock = true;
+      setTimeout(function () {
+        if (!G.active) return;
+        G.lock = false;
+        newTask();
+      }, 600);
+    } else {
+      flashAnswer(btn, false);
+    }
+  }
+
+  function startGame() {
+    if (G.active) return;
+
+    G.active = true; G.score = 0; G.lock = false; G.target = null;
+    G.best = loadBest();
+
+    body.classList.add('is-playing');
+    lockControls(true);
+    hideNamesForGame(true);
+    gamebar.classList.add('is-on');
+    gameBtn.textContent = 'Стоп игру';
+    hint.textContent = 'Кликайте по планетам, пока тикает таймер · подписи намеренно скрыты';
+
+    paintStats();
+    newTask();
+    startTimer();
+  }
+
+  function endGame(showModal) {
+    if (!G.active) return;
+    G.active = false; G.lock = false;
+    stopTimer();
+
+    body.classList.remove('is-playing');
+    lockControls(false);
+    hideNamesForGame(false);
+    gamebar.classList.remove('is-on');
+    gameBtn.textContent = 'Найди планету';
+    hint.textContent = 'Нажмите на планету, чтобы увидеть карточку · клавиши ← и → переключают планеты';
+
+    var isNew = G.score > G.best;
+    if (isNew) { G.best = G.score; saveBest(G.best); }
+    gBest.textContent = G.best;
+
+    if (showModal) {
+      mScore.textContent = G.score;
+      mBest.textContent = G.best;
+      mNote.textContent = (isNew && G.score > 0) ? 'Новый рекорд!' : '';
+      gameModal.classList.add('is-on');
+      againBtn.focus();
+    }
+  }
+
+  function closeModal() { gameModal.classList.remove('is-on'); }
+
+  gameBtn.addEventListener('click', function () {
+    if (G.active) endGame(true); else { closeModal(); startGame(); }
+  });
+  stopBtn.addEventListener('click', function () { endGame(true); });
+  againBtn.addEventListener('click', function () { closeModal(); startGame(); });
+  closeBtn.addEventListener('click', function () { closeModal(); });
+  gameModal.addEventListener('click', function (e) { if (e.target === gameModal) closeModal(); });
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape' && gameModal.classList.contains('is-on')) closeModal();
+  });
+
+  /* ==========================================================================
+     JS-БЛОК 10. СОБЫТИЯ СЦЕНЫ И КЛАВИАТУРЫ
+     ========================================================================== */
+  system.addEventListener('click', function (e) {
+    var btn = e.target.closest ? e.target.closest('.planet, .sun') : null;
+    if (!btn) return;
+    if (G.active) { handleGameClick(btn); return; }
+    showInfo(btn.dataset.key);
+  });
+
+  system.addEventListener('focusin', function (e) {
+    if (G.active) return;
+    var btn = e.target.closest ? e.target.closest('.planet, .sun') : null;
+    if (btn) showInfo(btn.dataset.key);
+  });
+
+  document.addEventListener('keydown', function (e) {
+    if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+    if (G.active) return;
+    var tag = (e.target.tagName || '').toLowerCase();
+    if (tag === 'input' || tag === 'textarea') return;
+    if (!system.contains(document.activeElement) && document.activeElement !== document.body) return;
+    e.preventDefault();
+    stepBody(e.key === 'ArrowRight' ? 1 : -1);
+  });
+
+  /* ==========================================================================
+     JS-БЛОК 11. СТАРТ
+     ========================================================================== */
+  buildSystem();
+  buildStars();
+  fitSystem();
+  resetInfo();
+  syncFsButton();
+
+  /* Первая комета — через 6 секунд, далее каждые 20–30 секунд */
+  if (!reduceMotion) {
+    setTimeout(function () { spawnComet(); scheduleComet(); }, 6000);
+  }
+
+  G.best = loadBest();
+  gBest.textContent = G.best;
+
+  requestAnimationFrame(function () {
+    collectAnims();
+    setSpeed(parseFloat(speedInput.value));
+  });
+})();
+</script>
+
+</body>
+</html>
